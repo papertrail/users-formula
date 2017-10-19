@@ -175,34 +175,34 @@ user_keydir_{{ name }}:
   {% endif %}
 
   {% if 'ssh_keys' in user %}
-  {% set key_type = 'id_' + user.get('ssh_key_type', 'rsa') %}
-users_user_{{ name }}_private_key:
+    {% for _key in user.ssh_keys.keys() %}
+      {% if _key == 'privkey' %}
+        {% set key_name = 'id_' + user.get('ssh_key_type', 'rsa') %}
+      {% elif _key ==  'pubkey' %}
+        {% set key_name = 'id_' + user.get('ssh_key_type', 'rsa') + '.pub' %}
+      {% else %}
+        {% set key_name = _key %}
+      {% endif %}
+users_{{ name }}_{{ key_name }}_key:
   file.managed:
-    - name: {{ home }}/.ssh/{{ key_type }}
+    - name: {{ home }}/.ssh/{{ key_name }}
     - user: {{ name }}
     - group: {{ user_group }}
-    - mode: 600
-    - show_diff: False
-    - contents_pillar: users:{{ name }}:ssh_keys:privkey
-    - require:
-      - user: users_{{ name }}_user
-      {% for group in user.get('groups', []) %}
-      - group: users_{{ name }}_{{ group }}_group
-      {% endfor %}
-users_user_{{ name }}_public_key:
-  file.managed:
-    - name: {{ home }}/.ssh/{{ key_type }}.pub
-    - user: {{ name }}
-    - group: {{ user_group }}
+      {% if key_name.endswith(".pub") %}
     - mode: 644
+      {% else %}
+    - mode: 600
+      {% endif %}
     - show_diff: False
-    - contents_pillar: users:{{ name }}:ssh_keys:pubkey
+    - contents_pillar: users:{{ name }}:ssh_keys:{{ _key }}
     - require:
       - user: users_{{ name }}_user
       {% for group in user.get('groups', []) %}
       - group: users_{{ name }}_{{ group }}_group
       {% endfor %}
+    {% endfor %}
   {% endif %}
+
 
 {% if 'ssh_auth_file' in user or 'ssh_auth_pillar' in user %}
 users_authorized_keys_{{ name }}:
@@ -217,8 +217,9 @@ users_authorized_keys_{{ name }}:
         {{ auth }}
         {% endfor -%}
 {% else %}
+    - contents: |
         {%- for key_name, pillar_name in user['ssh_auth_pillar'].items() %}
-    - contents_pillar: {{ pillar_name }}:{{ key_name }}:pubkey
+        {{ salt['pillar.get'](pillar_name + ':' + key_name + ':pubkey', '') }}
         {%- endfor %}
 {% endif %}
 {% endif %}
@@ -270,6 +271,18 @@ user_ssh_keys_files_{{ name }}_{{ key_name }}_public_key:
 {% for pubkey_file in user['ssh_auth_sources'] %}
 users_ssh_auth_source_{{ name }}_{{ loop.index0 }}:
   ssh_auth.present:
+    - user: {{ name }}
+    - source: {{ pubkey_file }}
+    - require:
+        - file: users_{{ name }}_user
+        - user: users_{{ name }}_user
+{% endfor %}
+{% endif %}
+
+{% if 'ssh_auth_sources.absent' in user %}
+{% for pubkey_file in user['ssh_auth_sources.absent'] %}
+users_ssh_auth_source_delete_{{ name }}_{{ loop.index0 }}:
+  ssh_auth.absent:
     - user: {{ name }}
     - source: {{ pubkey_file }}
     - require:
@@ -342,12 +355,13 @@ users_ssh_known_hosts_delete_{{ name }}_{{ loop.index0 }}:
 {% endfor %}
 {% endif %}
 
+{% set sudoers_d_filename = name|replace('.','_') %}
 {% if 'sudouser' in user and user['sudouser'] %}
 
 users_sudoer-{{ name }}:
   file.managed:
     - replace: False
-    - name: {{ users.sudoers_dir }}/{{ name }}
+    - name: {{ users.sudoers_dir }}/{{ sudoers_d_filename }}
     - user: root
     - group: {{ users.root_group }}
     - mode: '0440'
@@ -386,7 +400,7 @@ users_sudoer-{{ name }}:
 users_{{ users.sudoers_dir }}/{{ name }}:
   file.managed:
     - replace: True
-    - name: {{ users.sudoers_dir }}/{{ name }}
+    - name: {{ users.sudoers_dir }}/{{ sudoers_d_filename }}
     - contents: |
       {%- if 'sudo_defaults' in user %}
       {%- for entry in user['sudo_defaults'] %}
@@ -407,14 +421,14 @@ users_{{ users.sudoers_dir }}/{{ name }}:
       - file: users_sudoer-defaults
       - file: users_sudoer-{{ name }}
   cmd.wait:
-    - name: visudo -cf {{ users.sudoers_dir }}/{{ name }} || ( rm -rvf {{ users.sudoers_dir }}/{{ name }}; exit 1 )
+    - name: visudo -cf {{ users.sudoers_dir }}/{{ sudoers_d_filename }} || ( rm -rvf {{ users.sudoers_dir }}/{{ sudoers_d_filename }}; exit 1 )
     - watch:
-      - file: {{ users.sudoers_dir }}/{{ name }}
+      - file: {{ users.sudoers_dir }}/{{ sudoers_d_filename }}
 {% endif %}
 {% else %}
-users_{{ users.sudoers_dir }}/{{ name }}:
+users_{{ users.sudoers_dir }}/{{ sudoers_d_filename }}:
   file.absent:
-    - name: {{ users.sudoers_dir }}/{{ name }}
+    - name: {{ users.sudoers_dir }}/{{ sudoers_d_filename }}
 {% endif %}
 
 {%- if 'google_auth' in user %}
@@ -448,7 +462,7 @@ users_googleauth-{{ svc }}-{{ name }}:
 {% if 'gitconfig' in user %}
 {% for key, value in user['gitconfig'].items() %}
 users_{{ name }}_user_gitconfig_{{ loop.index0 }}:
-  {% if grains['saltversioninfo'] >= (2015, 8, 0, 0) %}
+  {% if grains['saltversioninfo'] >= [2015, 8, 0, 0] %}
   git.config_set:
   {% else %}
   git.config:
@@ -456,7 +470,7 @@ users_{{ name }}_user_gitconfig_{{ loop.index0 }}:
     - name: {{ key }}
     - value: "{{ value }}"
     - user: {{ name }}
-    {% if grains['saltversioninfo'] >= (2015, 8, 0, 0) %}
+    {% if grains['saltversioninfo'] >= [2015, 8, 0, 0] %}
     - global: True
     {% else %}
     - is_global: True
