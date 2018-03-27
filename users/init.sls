@@ -63,6 +63,7 @@ users_{{ name }}_user:
     - user: {{ user.get('homedir_owner', name) }}
     - group: {{ user.get('homedir_group', user_group) }}
     - mode: {{ user.get('user_dir_mode', '0750') }}
+    - makedirs: True
     - require:
       - user: users_{{ name }}_user
       - group: {{ user_group }}
@@ -116,7 +117,7 @@ users_{{ name }}_user:
     - workphone: {{ user['workphone'] }}
     {% endif %}
     {% if 'homephone' in user %}
-    - homephone: {{ user['workphone'] }}
+    - homephone: {{ user['homephone'] }}
     {% endif %}
     {% if not user.get('createhome', True) %}
     - createhome: False
@@ -446,10 +447,6 @@ users_googleauth-{{ svc }}-{{ name }}:
 {%- endfor %}
 {%- endif %}
 
-#
-# if not salt['cmd.has_exec']('git')
-# fails even if git is installed
-#
 # this doesn't work (Salt bug), therefore need to run state.apply twice
 #include:
 #  - users
@@ -460,6 +457,7 @@ users_googleauth-{{ svc }}-{{ name }}:
 #      - sls: users
 #
 {% if 'gitconfig' in user %}
+{% if salt['cmd.has_exec']('git') %}
 {% for key, value in user['gitconfig'].items() %}
 users_{{ name }}_user_gitconfig_{{ loop.index0 }}:
   {% if grains['saltversioninfo'] >= [2015, 8, 0, 0] %}
@@ -476,6 +474,7 @@ users_{{ name }}_user_gitconfig_{{ loop.index0 }}:
     - is_global: True
     {% endif %}
 {% endfor %}
+{% endif %}
 {% endif %}
 
 {% endfor %}
